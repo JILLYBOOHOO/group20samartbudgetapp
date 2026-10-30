@@ -229,7 +229,7 @@ def camera_flow(store):
         caption('If the camera does not start, check the browser camera permission or use the photo upload above.')
         return
     content=photo.getvalue();digest=hashlib.sha256(content).hexdigest()
-    text_key='camera_text_'+digest;pdf_key='camera_pdf_'+digest
+    text_key='camera_text_v2_'+digest;pdf_key='camera_pdf_v2_'+digest
     # Check the remembered session state before showing or running this section.
     if text_key not in st.session_state:
         # Run the following action only after this button is clicked.
@@ -265,12 +265,12 @@ def camera_flow(store):
         draft=suggest(text,kind='Expense')
         if not draft.get('amount_text'):
             st.info('No reliable total was found. Check the extracted text and enter the amount below.')
-        review_form(store,draft,'camera_review_'+digest)
+        review_form(store,draft,'camera_review_v2_'+digest)
         return
     if any(r.get('document_id')==existing['id'] for r in store.load('transactions')):
         st.success('This receipt already has a saved transaction. You can edit it in Income & Expenses.')
         return
-    review_form(store,suggest(text,kind='Expense'),'camera_review_'+digest,document=existing)
+    review_form(store,suggest(text,kind='Expense'),'camera_review_v2_'+digest,document=existing)
 
 
 # Clear the popup state when the user closes this dialog.

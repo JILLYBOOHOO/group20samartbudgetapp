@@ -38,6 +38,9 @@ def categorize(description, kind='Expense'):
 
 # Extract a draft amount, date and category from text for the user to review.
 def suggest(text, kind=None):
+    # OCR can split the final lowercase l into a capital I, 1 or vertical bar.
+    # Normalise only total labels, never digits in monetary amounts.
+    text=re.sub(r'\b(sub)?tota[ \t]*[i1|]\b',lambda m:(m.group(1) or '')+'total',text,flags=re.I)
     lowered = text.lower()
     kind = kind or ('Income' if re.search(r'\b(made|earned|received|salary|paid me|income)\b', lowered) else 'Expense')
     # Prefer a labelled total; otherwise accept an explicitly currency-marked amount.

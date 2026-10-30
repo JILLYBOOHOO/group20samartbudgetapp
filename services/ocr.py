@@ -67,6 +67,11 @@ def photo_to_pdf(content):
             if source.width*source.height>16_000_000:
                 raise ValueError('The photo is too large. Use a photo below 16 megapixels.')
             image=ImageOps.exif_transpose(source).convert('RGB')
+            # Enlarge small screenshots before PDF rendering so receipt digits retain detail.
+            if image.width < 1400:
+                scale=min(4,1400/image.width)
+                resized=image.resize((round(image.width*scale),round(image.height*scale)),Image.Resampling.LANCZOS)
+                image.close();image=resized
             # Handle expected failures here so the app can show a readable error.
             try:
                 output=io.BytesIO();image.save(output,format='PDF',resolution=150.0)
@@ -115,7 +120,7 @@ def portable_ocr_pdf(content, work_root):
                 rendered=subprocess.run([renderer,'-f',str(index+1),'-l',str(index+1),'-singlefile','-scale-to','2400','-png',str(source),str(prefix)],capture_output=True,timeout=max(1,deadline-time.monotonic()))
                 if rendered.returncode:
                     raise ValueError('OCR could not render this PDF. Try a clearer receipt photo.')
-                read=subprocess.run([engine,str(prefix)+'.png','stdout','-l','eng'],capture_output=True,timeout=max(1,deadline-time.monotonic()))
+                read=subprocess.run([engine,str(prefix)+'.png','stdout','-l','eng','--psm','6','-c','preserve_interword_spaces=1'],capture_output=True,timeout=max(1,deadline-time.monotonic()))
                 if read.returncode:
                     raise ValueError('OCR could not read this receipt. Try a clearer photo.')
                 parts.append(read.stdout.decode('utf-8',errors='replace'))
