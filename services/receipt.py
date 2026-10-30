@@ -8,11 +8,15 @@ def receipt_draft(text):
     from services.capture import suggest
     draft=suggest('',kind='Expense')
     lines=[re.sub(r'\s+',' ',line).strip() for line in text.splitlines() if line.strip()]
-    clean=re.sub(r'\b(sub)?tota[ \t]*[i1|]\b',lambda m:(m.group(1) or '')+'total',text,flags=re.I)
+    clean=re.sub(r'\b(sub)?tota[ \t]*[i1|](?!\w)',lambda m:(m.group(1) or '')+'total',text,flags=re.I)
     total=None; subtotal=None; tax=None; raw_total=None; notes=[]
     def number(value):
-        value=value.strip().replace(',','')
-        return Decimal(value) if re.fullmatch(r'\d+\.\d{2}',value) else None
+        value=value.strip()
+        # Tesseract often reads a small decimal point as a comma. Exactly two
+        # trailing digits denote cents; a three-digit group remains thousands.
+        if re.fullmatch(r'\d+,\d{2}',value): value=value.replace(',','.')
+        if not re.fullmatch(r'(?:\d+|\d{1,3}(?:,\d{3})+)\.\d{2}',value): return None
+        return Decimal(value.replace(',',''))
     # Restrict amounts to labelled receipt lines. Never use the first dollar price.
     for line in clean.splitlines():
         match=re.search(r'^\s*(grand\s+total|total(?:\s+(?:due|amount|payable))?|amount\s+due|sub\s*total|tax)\b\s*[:=]?\s*(?:JMD|JM?\s*[$S]|[$S])?\s*([\d,]+(?:[.,]\s*\d{2})?)\s*$',line,re.I)
