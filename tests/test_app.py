@@ -110,10 +110,10 @@ def test_savings_smart_action_popup(tmp_path,monkeypatch):
     monkeypatch.setenv('SMARTBUDGET_DATA',str(tmp_path))
     store=Store(tmp_path); seed(store); demo(store)
     app=AppTest.from_file(str(APP),default_timeout=30).run()
-    next(b for b in app.button if b.label=='Add savings contribution').click().run()
+    next(b for b in app.button if b.label=='Manage savings').click().run()
     assert not app.exception
-    next(w for w in app.text_input if w.label=='Amount to set aside (JMD)').set_value('1000')
-    next(b for b in app.button if b.label=='Save contribution').click().run()
+    next(w for w in app.text_input if w.label=='Contribution (JMD)').set_value('1000')
+    next(b for b in app.button if b.label=='Record contribution').click().run()
     assert not app.exception
     assert sum(c['amount'] for c in store.load('goals')[0]['contributions'])==8350000
 
