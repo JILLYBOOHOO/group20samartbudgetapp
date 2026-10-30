@@ -1,0 +1,13 @@
+name: Receipt OCR
+on: [push, workflow_dispatch]
+jobs:
+  cloud-receipts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: sudo apt-get update && sudo apt-get install -y tesseract-ocr tesseract-ocr-eng poppler-utils
+      - run: pip install -r requirements.txt
+      - run: python -m pytest tests/test_receipt_draft.py tests/test_receipt_images.py -v -s

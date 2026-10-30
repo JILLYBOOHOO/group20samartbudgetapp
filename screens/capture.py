@@ -204,7 +204,9 @@ def upload_flow(store):
             # Write this complete collection of records to storage.
             store.save('transactions',rows); saved_notice()
     else:
-        draft=suggest(text)
+        from services.receipt import receipt_draft
+        draft=receipt_draft(text)
+        for note in draft['extraction_notes']: st.info(note)
         st.info('Suggested details only. Check the amount, direction, category and date. An invoice is not necessarily paid; save only money actually spent or received.')
         # Store the document explicitly; financial records still require the form's Save.
         if not existing:
@@ -216,7 +218,7 @@ def upload_flow(store):
         if any(r.get('document_id')==existing['id'] for r in store.load('transactions')):
             st.warning('A transaction is already linked to this document. You can edit it in the ledger.')
             return
-        review_form(store,draft,'receipt_'+digest,document=existing)
+        review_form(store,draft,'receipt_v3_'+digest,document=existing)
 
 # Capture or upload a receipt, run OCR on request, and require review before saving.
 def camera_flow(store):
@@ -229,7 +231,7 @@ def camera_flow(store):
         caption('If the camera does not start, check the browser camera permission or use the photo upload above.')
         return
     content=photo.getvalue();digest=hashlib.sha256(content).hexdigest()
-    text_key='camera_text_v2_'+digest;pdf_key='camera_pdf_v2_'+digest
+    text_key='camera_text_v3_'+digest;pdf_key='camera_pdf_v3_'+digest
     # Check the remembered session state before showing or running this section.
     if text_key not in st.session_state:
         # Run the following action only after this button is clicked.
@@ -262,15 +264,18 @@ def camera_flow(store):
             # Restart the screen so it displays the latest saved data.
             st.rerun(scope='app')
         # Show the extracted amount immediately; retaining the receipt is optional.
-        draft=suggest(text,kind='Expense')
-        if not draft.get('amount_text'):
-            st.info('No reliable total was found. Check the extracted text and enter the amount below.')
-        review_form(store,draft,'camera_review_v2_'+digest)
+        from services.receipt import receipt_draft
+        draft=receipt_draft(text)
+        for note in draft['extraction_notes']: st.info(note)
+        review_form(store,draft,'camera_review_v3_'+digest)
         return
     if any(r.get('document_id')==existing['id'] for r in store.load('transactions')):
         st.success('This receipt already has a saved transaction. You can edit it in Income & Expenses.')
         return
-    review_form(store,suggest(text,kind='Expense'),'camera_review_v2_'+digest,document=existing)
+    from services.receipt import receipt_draft
+    draft=receipt_draft(text)
+    for note in draft['extraction_notes']: st.info(note)
+    review_form(store,draft,'camera_review_v3_'+digest,document=existing)
 
 
 # Clear the popup state when the user closes this dialog.
