@@ -45,7 +45,6 @@ if cloud_demo:
         from services.demo_data import initialize_demo
         initialize_demo(Store(st.session_state['_cloud_workspace'].name), Path(__file__).parent / 'demo_data')
     store=Store(st.session_state['_cloud_workspace'].name)
-    st.info('Demo starts with fictional Group 20 records. Use fictional records only. Records are temporary and separate for each visitor. Export your records before leaving. Receipt OCR runs on the server. Review all extracted details before saving.')
 else:
     # Choose the persistent data folder; SMARTBUDGET_DATA can override the default.
     store = Store(os.environ.get('SMARTBUDGET_DATA', str(Path(__file__).parent / 'data')))
