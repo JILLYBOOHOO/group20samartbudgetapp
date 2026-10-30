@@ -77,12 +77,13 @@ def dashboard(store):
     st.subheader('Quick Actions')
     # Put the following controls inside st.container(key='quick_actions').
     with st.container(key='quick_actions'):
-        cols=st.columns(5)
+        cols=st.columns(6)
         cols[0].button('Add Income',icon=':material/add_circle:',on_click=request_capture,args=('Income',),width='stretch')
         cols[1].button('Add Expense',icon=':material/receipt_long:',on_click=request_capture,args=('Expense',),width='stretch')
         cols[2].button('Upload Bill',icon=':material/upload_file:',on_click=request_capture,args=('Upload',),width='stretch')
         cols[3].button('Set Budget',icon=':material/target:',on_click=lambda:st.session_state.update(budget_open=True),width='stretch')
         cols[4].button('Transactions',icon=':material/sync_alt:',on_click=go_to,args=('Income & Expenses',),width='stretch')
+        cols[5].button('Ask SmartBudget',icon=':material/auto_awesome:',key='orbit_ask',on_click=go_to,args=('Ask SmartBudget',),width='stretch')
         # Keep the camera outside the outer columns so CSS centres it on the whole orbit.
         st.button('Capture receipt',icon=':material/photo_camera:',key='orbit_capture',on_click=request_capture,args=('Camera',),width='stretch',type='primary')
     # Put the following controls inside st.container(key='analytics').
