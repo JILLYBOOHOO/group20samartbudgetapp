@@ -233,7 +233,7 @@ def camera_flow(store):
     # Check the remembered session state before showing or running this section.
     if text_key not in st.session_state:
         # Run the following action only after this button is clicked.
-        if not st.button('Read receipt photo',type='primary',key='read_photo_'+digest): return
+        # Extract once per uploaded image; cache the result across reruns.
         # Handle expected failures here so the app can show a readable error.
         try:
             # Bring the listed helpers from services.ocr into this file.
@@ -261,11 +261,16 @@ def camera_flow(store):
             store.put('documents',dict(id=identifier,name='Camera receipt.pdf',file=filename,text=text,size=len(pdf),digest=digest,date=date.today().isoformat()))
             # Restart the screen so it displays the latest saved data.
             st.rerun(scope='app')
+        # Show the extracted amount immediately; retaining the receipt is optional.
+        draft=suggest(text,kind='Expense')
+        if not draft.get('amount_text'):
+            st.info('No reliable total was found. Check the extracted text and enter the amount below.')
+        review_form(store,draft,'camera_review_'+digest)
         return
     if any(r.get('document_id')==existing['id'] for r in store.load('transactions')):
         st.success('This receipt already has a saved transaction. You can edit it in Income & Expenses.')
         return
-    review_form(store,suggest(text),'camera_review_'+digest,document=existing)
+    review_form(store,suggest(text,kind='Expense'),'camera_review_'+digest,document=existing)
 
 
 # Clear the popup state when the user closes this dialog.

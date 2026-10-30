@@ -41,7 +41,12 @@ def suggest(text, kind=None):
     lowered = text.lower()
     kind = kind or ('Income' if re.search(r'\b(made|earned|received|salary|paid me|income)\b', lowered) else 'Expense')
     # Prefer a labelled total; otherwise accept an explicitly currency-marked amount.
-    labelled = re.search(r'\b(?:grand total|amount due|total due|total|amount)\s*[:=]?\s*(?:JMD|J\$|\$)?\s*([\d,]+(?:\.\d{1,2})?)', text, re.I)
+    # Prefer a payable/grand total over earlier subtotals or item prices.
+    labelled = None
+    for label in [r'grand\s+total', r'total\s+(?:due|amount|payable)',
+                  r'amount\s+(?:due|payable)', r'balance\s+due', r'total', r'amount']:
+        labelled = re.search(r'\b'+label+r'\b[\s:=$-]*(?:JMD|J\s*\$|JM\s*\$|\$)?\s*([\d,]+(?:\.\d{1,2})?)', text, re.I)
+        if labelled: break
     currency = re.search(r'(?:JMD|J\$|\$)\s*([\d,]+(?:\.\d{1,2})?)', text, re.I)
     casual = re.search(r'\b(?:spent|made|earned|received|paid|bought)\s+(?:JMD|J\$|\$)?\s*([\d,]+(?:\.\d{1,2})?)(?:\s*(k))?', text, re.I)
     match = labelled or currency or casual
