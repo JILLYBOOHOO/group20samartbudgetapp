@@ -1,0 +1,16 @@
+[
+  {
+    "id": "b76f524eb8c5445d9f83b896c7dfdf4a",
+    "name": "Christmas",
+    "target": 3500000,
+    "deadline": "2026-12-23",
+    "completed": false,
+    "contributions": [
+      {
+        "id": "ae7785a27de843bf945aab78c1d5d87c",
+        "amount": 2400000,
+        "date": "2026-10-30"
+      }
+    ]
+  }
+]

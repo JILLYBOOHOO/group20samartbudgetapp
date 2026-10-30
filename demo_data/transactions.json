@@ -1,0 +1,79 @@
+[
+  {
+    "id": "3dda3168368544cfac21a0ea696eb96d",
+    "type": "Expense",
+    "amount": 200000,
+    "description": "shien",
+    "category": "Other",
+    "date": "2026-10-30",
+    "payment": "Cash",
+    "source": "",
+    "notes": ""
+  },
+  {
+    "id": "a9deb90a36f7462ebc26b6d8e704d1d2",
+    "type": "Income",
+    "amount": 2500000,
+    "description": "pay",
+    "category": "Salary",
+    "date": "2026-10-30",
+    "payment": "Cash",
+    "source": "",
+    "notes": ""
+  },
+  {
+    "id": "c2bf996c964a4edcbb8fcd98f9a9ea1a",
+    "type": "Income",
+    "amount": 10000000,
+    "description": "pay",
+    "category": "Freelance Income",
+    "date": "2026-10-30",
+    "payment": "Cash",
+    "source": "",
+    "notes": ""
+  },
+  {
+    "id": "3708ad5d15ce4f43b7b993af94846b62",
+    "type": "Expense",
+    "amount": 1500000,
+    "description": "light",
+    "category": "Electricity",
+    "date": "2026-10-30",
+    "payment": "Cash",
+    "source": "",
+    "notes": ""
+  },
+  {
+    "id": "9aaf0a901a2b42a887dd5b44f279006b",
+    "type": "Expense",
+    "amount": 700000,
+    "description": "food",
+    "category": "Groceries",
+    "date": "2026-10-30",
+    "payment": "Cash",
+    "source": "",
+    "notes": ""
+  },
+  {
+    "id": "07792fb5a4ff43018f4a635d0a6d55e5",
+    "type": "Expense",
+    "amount": 300000,
+    "description": "insurance",
+    "category": "Healthcare",
+    "date": "2026-10-30",
+    "payment": "Cash",
+    "source": "",
+    "notes": ""
+  },
+  {
+    "id": "613b3c563494459fa1a744095bc5463e",
+    "type": "Expense",
+    "amount": 500000,
+    "description": "uber",
+    "category": "Transportation",
+    "date": "2026-10-30",
+    "payment": "Cash",
+    "source": "",
+    "notes": ""
+  }
+]

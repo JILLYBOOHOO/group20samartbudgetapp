@@ -1,0 +1,246 @@
+from pathlib import Path
+from streamlit.testing.v1 import AppTest
+from services.core import Store, demo, seed
+from io import BytesIO
+import streamlit as st
+
+APP=Path(__file__).resolve().parents[1]/'app.py'
+
+def test_five_screens_and_navigation(tmp_path,monkeypatch):
+    monkeypatch.setenv('SMARTBUDGET_DATA',str(tmp_path))
+    store=Store(tmp_path); seed(store); demo(store)
+    app=AppTest.from_file(str(APP),default_timeout=30).run()
+    assert not app.exception
+    for page in ['Income & Expenses','Documents','Knowledge Base','Ask SmartBudget','Dashboard']:
+        app.sidebar.radio[0].set_value(page).run()
+        assert not app.exception, page
+    assert not any(w.label == 'Appearance' for w in app.radio)
+
+def test_transaction_form_persistence(tmp_path,monkeypatch):
+    monkeypatch.setenv('SMARTBUDGET_DATA',str(tmp_path))
+    app=AppTest.from_file(str(APP),default_timeout=30).run()
+    app.sidebar.radio[0].set_value('Income & Expenses').run()
+    next(w for w in app.text_input if w.label=='Amount (JMD)').set_value('1234.56')
+    next(w for w in app.text_input if w.label=='Income source (optional)').set_value('Fictional employer')
+    next(w for w in app.text_input if w.label=='What was it for? (optional)').set_value('Test salary')
+    next(b for b in app.button if b.label=='Save transaction').click().run()
+    assert not app.exception
+    assert Store(tmp_path).load('transactions')[0]['amount']==123456
+    assert not AppTest.from_file(str(APP)).run().exception
+
+
+
+def test_invalid_input_is_visible(tmp_path,monkeypatch):
+    monkeypatch.setenv('SMARTBUDGET_DATA',str(tmp_path))
+    app=AppTest.from_file(str(APP),default_timeout=30).run()
+    app.sidebar.radio[0].set_value('Income & Expenses').run()
+    next(b for b in app.button if b.label=='Save transaction').click().run()
+    assert not app.exception
+    assert app.error
+    assert Store(tmp_path).load('transactions')==[]
+
+def test_quick_popup_and_optional_fields(tmp_path,monkeypatch):
+    monkeypatch.setenv('SMARTBUDGET_DATA',str(tmp_path))
+    app=AppTest.from_file(str(APP),default_timeout=30).run()
+    next(b for b in app.button if b.label=='Add Income').click().run()
+    assert not app.exception
+    assert any(w.label=='Amount (JMD)' for w in app.text_input)
+    next(w for w in app.text_input if w.label=='Amount (JMD)').set_value('7000')
+    next(b for b in app.button if b.label=='Save transaction').click().run()
+    assert not app.exception
+    record=Store(tmp_path).load('transactions')[0]
+    assert record['amount']==700000 and record['type']=='Income'
+    assert record['source']=='' and record['description']=='Money received'
+    next(b for b in app.button if b.label=='Set Budget').click().run()
+    assert not app.exception
+    next(w for w in app.text_input if w.label=='Limit (JMD)').set_value('45000')
+    next(b for b in app.button if b.label=='Save monthly limit').click().run()
+    assert not app.exception
+    assert Store(tmp_path).load('budgets')[0]['limit']==4500000
+
+def test_sentence_popup_and_upload_navigation(tmp_path,monkeypatch):
+    monkeypatch.setenv('SMARTBUDGET_DATA',str(tmp_path))
+    app=AppTest.from_file(str(APP),default_timeout=30).run()
+    next(b for b in app.button if b.label=='Add Expense').click().run()
+    next(w for w in app.text_input if w.label=='Or say it in one line').set_value('Spent 2500 on groceries yesterday').run()
+    next(b for b in app.button if b.label=='Use these details').click().run()
+    assert not app.exception
+    assert next(w for w in app.text_input if w.label=='Amount (JMD)').value=='2500'
+    next(b for b in app.button if b.label=='Save transaction').click().run()
+    assert Store(tmp_path).load('transactions')[0]['category']=='Groceries'
+    next(b for b in app.button if b.label=='Upload Bill').click().run()
+    assert not app.exception
+    assert any('PDF' in c.value for c in app.caption)
+
+def test_receipt_review_saves_only_after_confirmation(tmp_path,monkeypatch):
+    monkeypatch.setenv('SMARTBUDGET_DATA',str(tmp_path))
+    file=BytesIO(b'JPS electricity receipt\n2026-10-01\nAmount due: JMD 9000.25')
+    file.name='bill.txt'
+    monkeypatch.setattr(st,'file_uploader',lambda *args,**kwargs:file)
+    app=AppTest.from_file(str(APP),default_timeout=30).run()
+    app.sidebar.radio[0].set_value('Documents').run()
+    assert not Store(tmp_path).load('transactions')
+    next(b for b in app.button if b.label=='Keep document and review transaction').click().run()
+    assert not app.exception
+    assert len(Store(tmp_path).load('documents'))==1
+    assert not Store(tmp_path).load('transactions')
+    assert next(w for w in app.text_input if w.label=='Amount (JMD)').value=='9000.25'
+    next(b for b in app.button if b.label=='Save transaction').click().run()
+    assert not app.exception
+    assert Store(tmp_path).load('transactions')[0]['amount']==900025
+    assert not any(b.label=='Save transaction' for b in app.button)
+
+def test_csv_import_review_and_duplicate_block(tmp_path,monkeypatch):
+    monkeypatch.setenv('SMARTBUDGET_DATA',str(tmp_path))
+    file=BytesIO(b'date,description,amount,type\n2026-10-01,Salary,150000,Income\n2026-10-02,Groceries,2500,Expense')
+    file.name='transactions.csv'
+    monkeypatch.setattr(st,'file_uploader',lambda *args,**kwargs:file)
+    app=AppTest.from_file(str(APP),default_timeout=30).run()
+    app.sidebar.radio[0].set_value('Documents').run()
+    assert not app.exception
+    assert next(b for b in app.button if b.label=='Import reviewed transactions').disabled
+    next(c for c in app.checkbox if c.label=='I reviewed all 2 transactions').check().run()
+    next(b for b in app.button if b.label=='Import reviewed transactions').click().run()
+    assert not app.exception
+    assert len(Store(tmp_path).load('transactions'))==2
+    assert next(b for b in app.button if b.label=='Import reviewed transactions').disabled
+
+
+def test_savings_smart_action_popup(tmp_path,monkeypatch):
+    monkeypatch.setenv('SMARTBUDGET_DATA',str(tmp_path))
+    store=Store(tmp_path); seed(store); demo(store)
+    app=AppTest.from_file(str(APP),default_timeout=30).run()
+    next(b for b in app.button if b.label=='Add savings contribution').click().run()
+    assert not app.exception
+    next(w for w in app.text_input if w.label=='Amount to set aside (JMD)').set_value('1000')
+    next(b for b in app.button if b.label=='Save contribution').click().run()
+    assert not app.exception
+    assert sum(c['amount'] for c in store.load('goals')[0]['contributions'])==8350000
+
+def test_manual_entry_autocategorizes_and_allows_override(tmp_path,monkeypatch):
+    monkeypatch.setenv('SMARTBUDGET_DATA',str(tmp_path))
+    app=AppTest.from_file(str(APP),default_timeout=30).run()
+    next(b for b in app.button if b.label=='Add Expense').click().run()
+    next(w for w in app.text_input if w.label=='What was it for? (optional)').set_value('MEGAMART groceries').run()
+    assert any('Groceries' in w.value for w in app.caption)
+    next(w for w in app.text_input if w.label=='Amount (JMD)').set_value('3456.78')
+    next(b for b in app.button if b.label=='Save transaction').click().run()
+    assert not app.exception
+    assert Store(tmp_path).load('transactions')[0]['category']=='Groceries'
+    next(b for b in app.button if b.label=='Add Expense').click().run()
+    next(w for w in app.text_input if w.label=='What was it for? (optional)').set_value('Taxi')
+    next(w for w in app.selectbox if w.label=='Category').set_value('Other').run()
+    next(w for w in app.text_input if w.label=='Amount (JMD)').set_value('800')
+    next(b for b in app.button if b.label=='Save transaction').click().run()
+    assert not app.exception
+    assert Store(tmp_path).load('transactions')[-1]['category']=='Other'
+
+def test_bank_statement_import_analysis(tmp_path,monkeypatch):
+    monkeypatch.setenv('SMARTBUDGET_DATA',str(tmp_path))
+    file=BytesIO(b'Date,Description,Debit,Credit,Balance\n01/10/2026,MEGAMART,2500.00,,97500.00\n02/10/2026,PAYROLL,,150000.00,247500.00')
+    file.name='statement.csv'
+    monkeypatch.setattr(st,'file_uploader',lambda *args,**kwargs:file)
+    app=AppTest.from_file(str(APP),default_timeout=30).run()
+    app.sidebar.radio[0].set_value('Documents').run()
+    next(w for w in app.radio if w.label=='Use this CSV as').set_value('Bank statement').run()
+    assert not app.exception
+    assert next(m for m in app.metric if m.label=='Money out').value=='J$2,500.00'
+    assert not Store(tmp_path).load('transactions')
+    next(c for c in app.checkbox if c.label=='I checked the included transactions against my statement').check().run()
+    next(b for b in app.button if b.label=='Import bank statement').click().run()
+    assert not app.exception
+    rows=Store(tmp_path).load('transactions')
+    assert len(rows)==2 and rows[0]['category']=='Groceries' and rows[1]['type']=='Income'
+    assert next(b for b in app.button if b.label=='Import bank statement').disabled
+
+def test_global_search_and_reporting_month(tmp_path,monkeypatch):
+    monkeypatch.setenv('SMARTBUDGET_DATA',str(tmp_path))
+    store=Store(tmp_path);seed(store);demo(store)
+    app=AppTest.from_file(str(APP),default_timeout=30).run()
+    next(w for w in app.text_input if w.label=='Search SmartBudget').set_value('Fictional Salary').run()
+    next(b for b in app.button if b.label=='Open Income & Expenses').click().run()
+    assert not app.exception
+    assert app.session_state['screen']=='Income & Expenses'
+    from services.core import previous
+    from datetime import date
+    target=previous(date.today().strftime('%Y-%m'))
+    next(w for w in app.selectbox if w.label=='Reporting month').set_value(target).run()
+    assert app.session_state['month']==target
+
+def test_sidebar_savings_opens_visible_manager(tmp_path,monkeypatch):
+    monkeypatch.setenv('SMARTBUDGET_DATA',str(tmp_path))
+    app=AppTest.from_file(str(APP),default_timeout=30).run()
+    next(b for b in app.sidebar.button if b.label=='Savings goals').click().run()
+    assert not app.exception
+    assert app.session_state['savings_open']
+    assert any(e.label=='Create savings goal' and e.proto.expanded for e in app.expander)
+    next(w for w in app.text_input if w.label=='Goal name').set_value('Personal savings')
+    next(w for w in app.text_input if w.label=='Target amount (JMD)').set_value('50000')
+    next(b for b in app.button if b.label=='Create goal').click().run()
+    assert not app.exception
+    assert any(e.label=='Manage Personal savings' and e.proto.expanded for e in app.expander)
+    next(w for w in app.text_input if w.label=='Contribution (JMD)').set_value('20000')
+    next(b for b in app.button if b.label=='Record contribution').click().run()
+    assert not app.exception
+    assert Store(tmp_path).load('goals')[0]['contributions'][0]['amount']==2000000
+
+
+def test_scanned_pdf_requires_ocr_click_and_review(tmp_path,monkeypatch):
+    from pypdf import PdfWriter
+    import services.ocr as ocr
+    monkeypatch.setenv('SMARTBUDGET_DATA',str(tmp_path))
+    file=BytesIO();writer=PdfWriter();writer.add_blank_page(300,300);writer.write(file);file.name='receipt-scan.pdf'
+    monkeypatch.setattr(st,'file_uploader',lambda *args,**kwargs:file)
+    calls=[]
+    def read(*args):
+        calls.append(1);return 'JPS Electricity receipt\n2026-10-01\nTotal: JMD 9000.00'
+    monkeypatch.setattr(ocr,'ocr_pdf',read)
+    app=AppTest.from_file(str(APP),default_timeout=30).run()
+    app.sidebar.radio[0].set_value('Documents').run()
+    assert not app.exception and not calls
+    next(b for b in app.button if b.label=='Read scanned PDF with OCR').click().run()
+    assert not app.exception and len(calls)==1
+    assert any('OCR' in w.value for w in app.warning)
+    assert not Store(tmp_path).load('transactions')
+    next(b for b in app.button if b.label=='Keep document and review transaction').click().run()
+    assert len(calls)==1
+    assert not app.exception and not Store(tmp_path).load('transactions')
+    assert next(w for w in app.text_input if w.label=='Amount (JMD)').value=='9000'
+
+def test_camera_receipt_review_and_duplicate_prevention(tmp_path,monkeypatch):
+    from PIL import Image
+    import services.ocr as ocr
+    monkeypatch.setenv('SMARTBUDGET_DATA',str(tmp_path))
+    photo=BytesIO();Image.new('RGB',(100,100),'white').save(photo,format='JPEG');photo.name='camera.jpg'
+    monkeypatch.setattr(st,'camera_input',lambda *a,**k:photo)
+    monkeypatch.setattr(st,'file_uploader',lambda *a,**k:None)
+    calls=[]
+    def read(*args):calls.append(1);return 'JPS Electricity\n2026-10-01\nTotal: JMD 9000.00'
+    monkeypatch.setattr(ocr,'ocr_pdf',read)
+    app=AppTest.from_file(str(APP),default_timeout=30).run()
+    next(b for b in app.button if b.label=='Capture receipt').click().run()
+    assert not app.exception and not calls
+    next(b for b in app.button if b.label=='Read receipt photo').click().run()
+    assert not app.exception and len(calls)==1
+    assert not Store(tmp_path).load('documents') and not Store(tmp_path).load('transactions')
+    next(b for b in app.button if b.label=='Keep receipt and review transaction').click().run()
+    assert not app.exception and len(calls)==1
+    assert len(Store(tmp_path).load('documents'))==1 and not Store(tmp_path).load('transactions')
+    next(b for b in app.button if b.label=='Save transaction').click().run()
+    assert not app.exception
+    assert Store(tmp_path).load('transactions')[0]['amount']==900000
+    next(b for b in app.button if b.label=='Capture receipt').click().run()
+    assert not app.exception and len(Store(tmp_path).load('transactions'))==1
+    assert not any(b.label=='Save transaction' for b in app.button)
+
+def test_spending_speed_uses_persisted_total_budget(tmp_path,monkeypatch):
+    from services.core import uid
+    monkeypatch.setenv('SMARTBUDGET_DATA',str(tmp_path))
+    store=Store(tmp_path);seed(store)
+    store.put('budgets',dict(id=uid(),month='2026-10',category='All spending',limit=1000000,threshold=80))
+    store.put('transactions',dict(id=uid(),type='Expense',category='Groceries',amount=1250000,date='2026-10-01',description='Practice purchase',payment='Cash',source='',notes=''))
+    app=AppTest.from_file(str(APP),default_timeout=30).run()
+    assert not app.exception
+    assert any(h.value=='Spending speed' for h in app.subheader)
+    assert any(m.label=='Over budget' and m.value=='J$2,500.00' for m in app.metric)
+    assert any('needle stops at 100%' in c.value for c in app.caption)

@@ -1,0 +1,300 @@
+# Import hashlib so this file can use its functions and classes.
+import hashlib
+# Bring the listed helpers from datetime into this file.
+from datetime import date
+# Bring the listed helpers from decimal into this file.
+from decimal import Decimal
+# Bring the listed helpers from pathlib into this file.
+from pathlib import Path
+# Import streamlit so this file can use its functions and classes.
+import streamlit as st
+# Import pandas so this file can use its functions and classes.
+import pandas as pd
+# Bring the listed helpers from services.core into this file.
+from services.core import *
+# Bring the listed helpers from services.capture into this file.
+from services.capture import suggest, csv_drafts, categorize
+# Bring the listed helpers from services.statements into this file.
+from services.statements import csv_statement, text_statement, analysis
+# Bring the listed helpers from components.design into this file.
+from components.design import caption
+
+# Remember which entry dialog should open; opening it does not save a transaction.
+def request_capture(mode='Expense'):
+    if mode=='Upload':
+        st.session_state.screen='Documents'
+        st.session_state.pop('capture_mode',None)
+        return
+    st.session_state.capture_mode=mode
+    st.session_state.pop('quick_draft',None)
+    st.session_state.draft_revision=st.session_state.get('draft_revision',0)+1
+    st.session_state.capture_sentence=''
+
+# Close the entry dialog and refresh the app after saving successfully.
+def saved_notice():
+    st.session_state.notice='Saved. Your dashboard and ledger are updated.'
+    st.session_state.pop('capture_mode',None)
+    # Restart the screen so it displays the latest saved data.
+    st.rerun()
+
+# Let the user correct a draft and explicitly save a validated transaction.
+def review_form(store, draft, key, original=None, document=None):
+    """Compact reactive editor; category suggestion updates when description changes."""
+    original=original or {}
+    kind=st.radio('Money direction',['Expense','Income'],index=0 if draft.get('type','Expense')=='Expense' else 1,horizontal=True,key=key+'_kind',label_visibility='collapsed',format_func=lambda x:'I spent' if x=='Expense' else 'I received')
+    main,details=st.tabs(['Quick entry','Extra details'])
+    with main:
+        a,b=st.columns([1,1.4])
+        amount=a.text_input('Amount (JMD)',draft.get('amount_text',''),placeholder='e.g. 2500',key=key+'_amount')
+        description=b.text_input('What was it for? (optional)',draft.get('description',''),placeholder='e.g. MegaMart groceries',key=key+'_description')
+        inferred=categorize(description,kind)
+        a,b=st.columns([1.4,1])
+        options=['Auto-detect']+CATEGORIES
+        default=original.get('category') or 'Auto-detect'
+        selection=a.selectbox('Category',options,index=options.index(default),key=key+'_category')
+        category=(inferred if inferred!='Other' else draft.get('category','Other')) if selection=='Auto-detect' else selection
+        when=b.date_input('Date',date.fromisoformat(draft.get('date',date.today().isoformat())),key=key+'_date')
+        caption('Suggested category: '+category+' · Change Category to override.' if selection=='Auto-detect' else 'Using your selected category: '+category)
+    with details:
+        a,b=st.columns(2)
+        payment=a.selectbox('Payment method',['Cash','Bank transfer','Debit card','Credit card','Other'],index=['Cash','Bank transfer','Debit card','Credit card','Other'].index(original.get('payment','Cash')),key=key+'_payment')
+        source=b.text_input('Income source (optional)',original.get('source',''),key=key+'_source')
+        notes=st.text_input('Notes (optional)',original.get('notes',''),key=key+'_notes')
+    # Run the following action only after this button is clicked.
+    if st.button('Save transaction',type='primary',width='stretch',key=key+'_save'):
+        # Handle expected failures here so the app can show a readable error.
+        try:
+            record={**original,'id':original.get('id',uid()),'type':kind,'amount':cents(amount),'description':description.strip() or ('Money received' if kind=='Income' else 'Money spent'),'category':category,'date':when.isoformat(),'payment':payment,'source':source.strip(),'notes':notes}
+            if document: record['document_id']=document['id']
+            # Save or update this record by its ID in the local data store.
+            validate_transaction(record); store.put('transactions',record)
+        # Catch this type of failure instead of continuing with invalid data.
+        except (ValueError,OSError) as exc:
+            st.error(str(exc)); return
+        saved_notice()
+
+# Show extracted statement rows for review and prevent duplicate imports.
+def statement_preview(store,file,content,text,digest,save_document):
+    caption('Amounts are interpreted as JMD. Foreign-currency statements are not supported.')
+    order=st.radio('Statement date format',['Day/month/year','Month/day/year'],horizontal=True,key='date_order_'+digest)
+    # Handle expected failures here so the app can show a readable error.
+    try:
+        drafts,skipped=(csv_statement(content,order.startswith('Day')) if file.name.lower().endswith('.csv') else text_statement(text,order.startswith('Day')))
+    # Catch this type of failure instead of continuing with invalid data.
+    except ValueError as exc:
+        st.error(str(exc)); return
+    # Offer a file download without changing the financial records.
+    st.download_button('Download extracted text',text,Path(file.name).stem+'-extracted.txt','text/plain',key='text_'+digest)
+    if skipped:
+        st.warning(f'{len(skipped)} lines or rows were excluded. Review the extraction notes before importing.')
+        # Put the following controls inside st.expander('Extraction notes').
+        with st.expander('Extraction notes'): st.text('\n'.join(skipped))
+    if not drafts:
+        st.info('No transaction rows recognized. For PDFs, use one line per transaction: full date, description, amount with two decimals, optional DR/CR, optional running balance. Export your bank statement as CSV for other layouts.'); return
+    caption('Categories are suggested from merchant descriptions. Edit any cell below. Running balances are excluded. Check every date, amount and money direction against your statement.')
+    if any(r['needs_review'] for r in drafts):
+        st.warning('Some money directions are uncertain. Those rows start unchecked; verify Income/Expense and tick Include to use them.')
+    frame=pd.DataFrame([{'Include':not r['needs_review'],'Date':r['date'],'Description':r['description'],'Type':r['type'],'Category':r['category'],'Amount (JMD)':str(Decimal(r['amount'])/100),'Check direction':r['needs_review']} for r in drafts])
+    edited=st.data_editor(frame,hide_index=True,width='stretch',height=min(310,80+35*len(frame)),key='statement_'+digest+order,column_config={
+        'Include':st.column_config.CheckboxColumn('Include'),
+        'Type':st.column_config.SelectboxColumn('Type',options=['Income','Expense'],required=True),
+        'Category':st.column_config.SelectboxColumn('Category',options=CATEGORIES,required=True),
+        'Amount (JMD)':st.column_config.TextColumn('Amount (JMD)',required=True),
+    },disabled=['Check direction'])
+    reviewed=[]
+    # Handle expected failures here so the app can show a readable error.
+    try:
+        for item in edited.to_dict('records'):
+            if not item['Include']: continue
+            record=dict(id=uid(),date=str(item['Date']),description=str(item['Description']).strip(),type=item['Type'],category=item['Category'],amount=cents(item['Amount (JMD)']),source='',payment='Bank transfer',notes='Reviewed bank statement import')
+            validate_transaction(record); reviewed.append(record)
+    # Catch this type of failure instead of continuing with invalid data.
+    except (ValueError,TypeError) as exc:
+        st.error('Correct the preview before importing: '+str(exc)); return
+    income,expense,cats=analysis(reviewed)
+    a,b,c=st.columns(3)
+    a.metric('Included',str(len(reviewed))); b.metric('Money in',money(income)); c.metric('Money out',money(expense))
+    if cats: caption('Spending: '+' · '.join(f'{k} {money(v)}' for k,v in cats.items()))
+    existing=store.load('transactions')
+    already=any(r.get('import_digest')==digest for r in existing)
+    if already: st.warning('This statement was already imported. No second import is allowed while its records exist.')
+    confirmed=st.checkbox('I checked the included transactions against my statement',key='checked_'+digest)
+    # Run the following action only after this button is clicked.
+    if st.button('Import bank statement',type='primary',disabled=not reviewed or not confirmed or already,key='import_'+digest):
+        document=save_document()
+        for record in reviewed:
+            record.update(document_id=document['id'],import_digest=digest)
+        # Write this complete collection of records to storage.
+        store.save('transactions',existing+reviewed); saved_notice()
+
+
+# Read an uploaded file and let the user choose how its text should be used.
+def upload_flow(store):
+    caption('Receipts, bills and bank statements · extracted locally · review before import.')
+    file=st.file_uploader('Choose PDF, TXT or CSV',type=['pdf','txt','csv'],key='capture_file')
+    caption('Text PDFs, TXT and CSV are read locally. Image-only PDFs can use local/server OCR (up to 20 pages); always check the extracted amounts.')
+    if file is None: return
+    content=file.getvalue(); digest=hashlib.sha256(content).hexdigest()
+    # Handle expected failures here so the app can show a readable error.
+    try:
+        text=extract(file.name,content)
+    # Catch this type of failure instead of continuing with invalid data.
+    except ValueError as exc:
+        if file.name.lower().endswith('.pdf') and 'No extractable text' in str(exc):
+            ocr_key='ocr_text_'+digest
+            text=st.session_state.get(ocr_key)
+            if not text:
+                st.info('This PDF contains scanned images. Use local OCR to turn those images into text.')
+                # Run the following action only after this button is clicked.
+                if not st.button('Read scanned PDF with OCR',type='primary',key='ocr_run_'+digest): return
+                # Handle expected failures here so the app can show a readable error.
+                try:
+                    # Bring the listed helpers from services.ocr into this file.
+                    from services.ocr import ocr_pdf
+                    # Put the following controls inside st.spinner('Reading scanned PDF locally. This can take a moment...').
+                    with st.spinner('Reading scanned PDF locally. This can take a moment...'):
+                        text=ocr_pdf(content,store.root)
+                    st.session_state[ocr_key]=text
+                # Catch this type of failure instead of continuing with invalid data.
+                except ValueError as ocr_error:
+                    st.error(str(ocr_error)); return
+        else:
+            st.error(str(exc)); return
+    # Check the remembered session state before showing or running this section.
+    if st.session_state.get('ocr_text_'+digest):
+        st.warning('Text was read using OCR. Check every date, amount and money direction against the original before importing. Statement layouts may need a CSV export.')
+    existing=next((d for d in store.load('documents') if d.get('digest')==digest),None)
+    # Put the following controls inside st.expander('View extracted text').
+    with st.expander('View extracted text'): st.text(text)
+    looks_bank='statement' in file.name.lower() or bool(re.search(r'(?i)\b(?:opening balance|closing balance|debit[^\n]*credit|withdrawal[^\n]*deposit)\b',text))
+    if file.name.lower().endswith('.csv'):
+        choice=st.radio('Use this CSV as',['Transaction list','Bank statement','One receipt or bill','Store document only'],index=1 if looks_bank else 0,horizontal=True)
+    else:
+        choice=st.radio('What would you like to do?',['One receipt or bill','Bank statement','Store document only'],index=1 if looks_bank else 0,horizontal=True)
+    def save_document():
+        if existing: return existing
+        identifier=uid(); filename=identifier+Path(file.name).suffix.lower()
+        (store.root/'uploads'/filename).write_bytes(content)
+        document=dict(id=identifier,name=Path(file.name).name,file=filename,text=text,size=len(content),digest=digest,date=date.today().isoformat())
+        # Save or update this record by its ID in the local data store.
+        store.put('documents',document); return document
+    if choice=='Store document only':
+        # Run the following action only after this button is clicked.
+        if st.button('Save document',type='primary'):
+            save_document(); saved_notice()
+    elif choice=='Bank statement':
+        statement_preview(store,file,content,text,digest,save_document)
+    elif choice=='Transaction list':
+        # Handle expected failures here so the app can show a readable error.
+        try: drafts=csv_drafts(content)
+        # Catch this type of failure instead of continuing with invalid data.
+        except ValueError as exc: st.error(str(exc)); return
+        st.dataframe([dict(Date=r['date'],Type=r['type'],Description=r['description'],Category=r['category'],Amount=money(r['amount'])) for r in drafts],hide_index=True,width='stretch')
+        caption('Amounts are JMD. A positive number defaults to Expense unless the CSV type column says Income. Correct the source CSV if any row is wrong.')
+        already=any(r.get('import_digest')==digest for r in store.load('transactions'))
+        if already: st.warning('This transaction file has already been imported. Delete its imported records before importing it again.')
+        confirmed=st.checkbox(f'I reviewed all {len(drafts)} transactions')
+        # Run the following action only after this button is clicked.
+        if st.button('Import reviewed transactions',type='primary',disabled=not confirmed or already):
+            document=save_document()
+            rows=store.load('transactions')
+            for draft in drafts:
+                record={**draft,'id':uid(),'document_id':document['id'],'import_digest':digest}
+                validate_transaction(record); rows.append(record)
+            # Write this complete collection of records to storage.
+            store.save('transactions',rows); saved_notice()
+    else:
+        draft=suggest(text)
+        st.info('Suggested details only. Check the amount, direction, category and date. An invoice is not necessarily paid; save only money actually spent or received.')
+        # Store the document explicitly; financial records still require the form's Save.
+        if not existing:
+            # Run the following action only after this button is clicked.
+            if st.button('Keep document and review transaction',type='primary'):
+                # Restart the screen so it displays the latest saved data.
+                save_document(); st.rerun(scope='app')
+            return
+        if any(r.get('document_id')==existing['id'] for r in store.load('transactions')):
+            st.warning('A transaction is already linked to this document. You can edit it in the ledger.')
+            return
+        review_form(store,draft,'receipt_'+digest,document=existing)
+
+# Capture or upload a receipt, run OCR on request, and require review before saving.
+def camera_flow(store):
+    st.subheader('Capture a receipt')
+    caption('Allow camera access when your browser asks, then take a clear photo. Nothing is recorded until you review and save.')
+    photo=st.camera_input('Take a receipt photo',key='receipt_camera')
+    fallback=st.file_uploader('Or choose a receipt photo',type=['jpg','jpeg','png'],key='receipt_camera_upload')
+    photo=photo if photo is not None else fallback
+    if photo is None:
+        caption('If the camera does not start, check the browser camera permission or use the photo upload above.')
+        return
+    content=photo.getvalue();digest=hashlib.sha256(content).hexdigest()
+    text_key='camera_text_'+digest;pdf_key='camera_pdf_'+digest
+    # Check the remembered session state before showing or running this section.
+    if text_key not in st.session_state:
+        # Run the following action only after this button is clicked.
+        if not st.button('Read receipt photo',type='primary',key='read_photo_'+digest): return
+        # Handle expected failures here so the app can show a readable error.
+        try:
+            # Bring the listed helpers from services.ocr into this file.
+            from services.ocr import photo_to_pdf,ocr_pdf
+            # Put the following controls inside st.spinner('Reading your receipt locally...').
+            with st.spinner('Reading your receipt locally...'):
+                pdf=photo_to_pdf(content);text=ocr_pdf(pdf,store.root)
+            st.session_state[text_key]=text;st.session_state[pdf_key]=pdf
+        # Catch this type of failure instead of continuing with invalid data.
+        except ValueError as exc:
+            st.error(str(exc)); return
+    text=st.session_state[text_key]
+    st.warning('OCR can misread amounts and dates. Check the details against your receipt before saving.')
+    # Put the following controls inside st.expander('View receipt text').
+    with st.expander('View receipt text'): st.text(text)
+    # Offer a file download without changing the financial records.
+    st.download_button('Download receipt text',text,'receipt-extracted.txt','text/plain',key='download_receipt_'+digest)
+    existing=next((d for d in store.load('documents') if d.get('digest')==digest),None)
+    if not existing:
+        # Run the following action only after this button is clicked.
+        if st.button('Keep receipt and review transaction',type='primary',key='keep_photo_'+digest):
+            identifier=uid();filename=identifier+'.pdf';pdf=st.session_state[pdf_key]
+            (store.root/'uploads'/filename).write_bytes(pdf)
+            # Save or update this record by its ID in the local data store.
+            store.put('documents',dict(id=identifier,name='Camera receipt.pdf',file=filename,text=text,size=len(pdf),digest=digest,date=date.today().isoformat()))
+            # Restart the screen so it displays the latest saved data.
+            st.rerun(scope='app')
+        return
+    if any(r.get('document_id')==existing['id'] for r in store.load('transactions')):
+        st.success('This receipt already has a saved transaction. You can edit it in Income & Expenses.')
+        return
+    review_form(store,suggest(text),'camera_review_'+digest,document=existing)
+
+
+# Clear the popup state when the user closes this dialog.
+def dismiss_capture():
+    st.session_state.pop('capture_mode',None)
+
+# Choose the correct camera, upload or manual-entry form inside the popup.
+@st.dialog('Add money activity',width='medium',on_dismiss=dismiss_capture)
+def capture_dialog(store):
+    mode=st.session_state.get('capture_mode','Expense')
+    if mode=='Camera':
+        camera_flow(store); return
+    if mode=='Upload':
+        upload_flow(store); return
+    # Put the following controls inside st.popover('✦ Type a sentence instead').
+    with st.popover('✦ Type a sentence instead'):
+        text=st.text_input('Or say it in one line',placeholder='Spent 2500 on groceries yesterday',key='capture_sentence')
+        # Run the following action only after this button is clicked.
+        if st.button('Use these details',disabled=not text.strip()):
+            # Handle expected failures here so the app can show a readable error.
+            try:
+                st.session_state.quick_draft=suggest(text)
+                st.session_state.draft_revision=st.session_state.get('draft_revision',0)+1
+            # Catch this type of failure instead of continuing with invalid data.
+            except ValueError as exc: st.error(str(exc))
+    draft=st.session_state.get('quick_draft',dict(type=mode,category='Other'))
+    review_form(store,draft,'quick_'+str(st.session_state.get('draft_revision',0)))
+
+# Open the capture popup only when a mode has been requested.
+def open_capture(store):
+    # Check the remembered session state before showing or running this section.
+    if st.session_state.get('capture_mode'): capture_dialog(store)
